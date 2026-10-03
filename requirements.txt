@@ -10,3 +10,7 @@ pandas>=2.2
 
 # Notebook
 ipykernel==7.4.0
+
+# Testes
+pytest>=8.0
+
