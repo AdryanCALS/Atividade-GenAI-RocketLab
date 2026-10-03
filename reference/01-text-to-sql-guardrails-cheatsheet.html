@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Referência Rápida: Arquitetura Text-to-SQL & Guardrails</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="lesson-meta">
+        <span>Guia de Referência #01</span>
+        <span class="badge">Referência Técnica</span>
+      </div>
+      <h1>Arquitetura Text-to-SQL & Guardrails</h1>
+      <p class="subtitle">Guia condensado para agentes de consulta com LangChain, Groq e SQLite</p>
+    </header>
+
+    <section>
+      <h2>1. O Ciclo de Vida de uma Consulta Text-to-SQL</h2>
+      <div class="diagram-box">
+        <pre><code>[Pergunta do Usuário]
+         │
+         ▼
+ ┌─────────────────┐
+ │ 1. Schema Link  │ ──► Identifica tabelas e colunas candidatas sem poluir o contexto
+ └────────┬────────┘
+          ▼
+ ┌─────────────────┐
+ │ 2. SQL Gen      │ ──► Gera consulta focada baseada apenas nas colunas pertinentes
+ └────────┬────────┘
+          ▼
+ ┌─────────────────┐
+ │ 3. Guardrails   │ ──► Bloqueia comandos destrutivos, injeta LIMIT e valida sintaxe
+ └────────┬────────┘
+          ▼
+ ┌─────────────────┐
+ │ 4. Safe Exec    │ ──► Executa no SQLite em modo read-only (PRAGMA query_only = ON)
+ └────────┬────────┘
+          ├── Se der erro ──► Loop de Auto-correção (alimenta o erro de volta ao modelo)
+          ▼
+ ┌─────────────────┐
+ │ 5. Síntese      │ ──► LLM traduz linhas brutas em resposta executiva e analítica
+ └─────────────────┘</code></pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>2. As 3 Camadas de Guardrails para Text-to-SQL</h2>
+      <p>Em ambientes corporativos, confiar apenas que a LLM "prometeu não apagar nada" é vulnerabilidade crítica (OWASP LLM07). A defesa deve ser em profundidade:</p>
+      
+      <div class="callout danger">
+        <div class="callout-title">Camada 1: Guardrail Léxico & Semântico (Regex / AST)</div>
+        <p>Valida o texto gerado antes que ele toque qualquer conexão de banco. Permite estritamente declarações <code>SELECT</code> e <code>WITH ... SELECT</code>. Rejeita <code>INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, ATTACH, DETACH, PRAGMA</code>.</p>
+      </div>
+
+      <div class="callout warning">
+        <div class="callout-title">Camada 2: Guardrail Operacional (LIMIT e Timeout)</div>
+        <p>Impede ataques de negação de serviço (DoS) por memória. Se o SQL do agente não tiver cláusula <code>LIMIT</code>, o middleware injeta automaticamente um teto máximo (ex.: <code>LIMIT 100</code>). Impõe timeout rígido de execução (ex.: 5 segundos).</p>
+      </div>
+
+      <div class="callout success">
+        <div class="callout-title">Camada 3: Guardrail de Driver / Infraestrutura (Read-Only)</div>
+        <p>No nível do conector SQLite, abrir a conexão em URI estritamente de leitura: <code>file:cinerocket.db?mode=ro</code> e aplicar <code>PRAGMA query_only = ON</code>. Mesmo que um atacante consiga burlar o parser de texto, o próprio kernel do SQLite abortará qualquer tentativa de escrita.</p>
+      </div>
+    </section>
+
+    <section>
+      <h2>3. Anatomia de Mensagens no LangChain Tool Calling</h2>
+      <p>O fluxo de conversação quando um modelo decide chamar ferramentas:</p>
+      <pre><code>from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+
+# 1. Usuário envia a pergunta
+messages = [HumanMessage(content="Qual o filme mais lucrativo?")]
+
+# 2. LLM responde pedindo a execução de uma tool
+response = llm_with_tools.invoke(messages)
+# response.tool_calls -> [{'name': 'execute_sql', 'args': {'query': '...'}, 'id': 'call_123'}]
+messages.append(response)
+
+# 3. Seu código executa a tool em Python e devolve como ToolMessage
+tool_output = execute_sql("SELECT titulo, lucro_brl FROM ... LIMIT 1")
+messages.append(ToolMessage(content=str(tool_output), tool_call_id='call_123'))
+
+# 4. LLM recebe o histórico completo e gera a resposta final em linguagem natural
+final_response = llm_with_tools.invoke(messages)
+print(final_response.content)</code></pre>
+    </section>
+
+    <section>
+      <h2>4. Mapa Dimensional do CineData (SQLite)</h2>
+      <p>Estrutura das tabelas para junções precisas:</p>
+      <ul>
+        <li><strong>Fato Central</strong>: <code>fact_movies_performance</code> (chave: <code>sk_movie_id</code>) — métricas de <code>receita_brl, orcamento_brl, lucro_brl, popularidade, nota_tmdb, nota_imdb</code>.</li>
+        <li><strong>Dimensão Filmes</strong>: <code>dim_movies</code> (chave: <code>sk_movie_id</code>) — metadados como <code>titulo, ano_lancamento, duracao_minutos, status_filme</code>.</li>
+        <li><strong>Dimensões & Bridges</strong>:
+          <ul>
+            <li>Gêneros: <code>dim_genres</code> ligada por <code>bridge_movie_genre</code></li>
+            <li>Pessoas (Atores/Diretores): <code>dim_people</code> ligada por <code>bridge_movie_person</code> (atenção ao campo <code>tipo_pessoa</code>)</li>
+            <li>Produtoras: <code>dim_companies</code> ligada por <code>bridge_movie_company</code></li>
+            <li>Avaliações: <code>dim_reviews</code> (agregadas) e <code>movie_reviews</code> (comentários textuais)</li>
+          </ul>
+        </li>
+      </ul>
+    </section>
+
+    <footer>
+      <p>Referência criada para o Rocket Lab 2026. Revise este documento antes de projetar suas queries e guardrails.</p>
+    </footer>
+  </div>
+</body>
+</html>

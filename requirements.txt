@@ -1,0 +1,12 @@
+# Agente
+langchain-core==1.6.6
+langchain-groq==1.1.3
+groq==0.37.1
+python-dotenv==1.2.4
+
+# Interface
+streamlit>=1.40
+pandas>=2.2
+
+# Notebook
+ipykernel==7.4.0

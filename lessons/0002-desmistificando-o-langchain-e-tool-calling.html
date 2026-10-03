@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lição 0002: Desmistificando o LangChain e a Mecânica de Tool Calling</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="lesson-meta">
+        <span>Lição 0002 · Text-to-SQL Masterclass</span>
+        <span class="badge">Orquestração & LangChain</span>
+      </div>
+      <h1>Desmistificando o LangChain e a Mecânica de Tool Calling</h1>
+      <p class="subtitle">Como o framework coordena mensagens, ferramentas em Python e o modelo de linguagem sem magia negra</p>
+    </header>
+
+    <section>
+      <h2>1. O que é o LangChain (e o que ele NÃO é)?</h2>
+      <p>
+        Para entender o LangChain, precisamos começar com uma verdade libertadora: <strong>modelos de linguagem (LLMs) são apenas preditores probabilísticos de texto</strong>.
+      </p>
+      <p>
+        O modelo <code>openai/gpt-oss-120b</code> que estamos usando via Groq não tem acesso à internet, não tem acesso ao seu disco rígido, não sabe abrir um arquivo <code>.db</code> e não possui memória entre uma requisição e outra. Ele é uma função pura: recebe uma lista de textos e gera o próximo texto mais provável.
+      </p>
+      <p>
+        O <strong>LangChain</strong> é o "sistema nervoso" que envelopa essa LLM. Ele não substitui o modelo; ele fornece a infraestrutura de engenharia de software para:
+      </p>
+      <ul>
+        <li><strong>Gerenciar o ciclo de conversação:</strong> Traduzir perguntas e respostas em uma estrutura formal de mensagens padronizadas.</li>
+        <li><strong>Inspecionar suas funções Python:</strong> Ler seus tipos (<code>type hints</code>) e documentação (<code>docstrings</code>) e traduzi-los em esquemas que a LLM entende.</li>
+        <li><strong>Fechar o loop de execução (ReAct):</strong> Quando a LLM pede para rodar uma consulta, o LangChain chama sua função local, recolhe a saída e entrega de volta ao modelo.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>2. A Ilusão do Tool Calling: A LLM NUNCA executa Python!</h2>
+      <p>
+        Um dos maiores equívocos de quem começa na área é acreditar que a LLM executa a ferramenta dentro dela. Isso nunca acontece. Veja o aperto de mãos exato do <em>Tool Calling</em>:
+      </p>
+
+      <div class="diagram-box">
+        <pre><code>[Você] "Qual o filme mais lucrativo?"
+  │
+  ▼
+[LangChain] Monta a lista com [HumanMessage] e as ferramentas disponíveis
+  │
+  ▼
+[Groq / gpt-oss-120b] 
+  Recebe o pedido e percebe: "Não sei responder de cabeça, preciso de SQL!"
+  Gera uma resposta especial: AIMessage com tool_calls:
+  [{'name': 'execute_sql', 'args': {'query': 'SELECT ...'}}]
+  │
+  ▼
+[LangChain / Seu Código Python]
+  1. Intercepta o pedido da LLM
+  2. Executa a SUA função Python localmente na SUA máquina
+  3. Seus Guardrails validam a query
+  4. Seu SQLite roda o SELECT com segurança
+  5. Empacota os dados retornados em um ToolMessage
+  │
+  ▼
+[Groq / gpt-oss-120b]
+  Recebe o histórico completo + o ToolMessage com os dados reais
+  Lê os números e sintetiza a resposta final em português humano
+  │
+  ▼
+[Você] Recebe: "O filme mais lucrativo do catálogo é Avatar: O Caminho da Água..."</code></pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>3. As 4 Peças Fundamentais do LangChain que Usaremos</h2>
+
+      <h3>1. ChatGroq (`langchain_groq`)</h3>
+      <p>
+        É a ponte entre o LangChain e a infraestrutura de alta velocidade da Groq. É nele que configuramos o modelo <code>openai/gpt-oss-120b</code> e a temperatura (usamos <code>0</code> para respostas analíticas e determinísticas).
+      </p>
+
+      <h3>2. O Decorador `@tool` (`langchain_core.tools`)</h3>
+      <p>
+        É um decorador mágico que transforma qualquer função Python normal em uma ferramenta do agente. O ponto mais crítico aqui é a <strong>Docstring</strong>:
+      </p>
+      <pre><code>from langchain_core.tools import tool
+
+@tool
+def inspect_tables(table_names: list[str]) -> str:
+    """Retorna o esquema (colunas e tipos) das tabelas solicitadas.
+    
+    Args:
+        table_names: Lista com os nomes exatos das tabelas a serem inspecionadas.
+    """
+    # Seu código Python de consulta ao sqlite_master
+    return "..."</code></pre>
+      <div class="callout info">
+        <div class="callout-title">Por que a Docstring é Vital?</div>
+        <p>
+          A LLM <strong>nunca vê o código interno</strong> da sua função. Ela lê exclusivamente o nome da função, os parâmetros e a docstring. A docstring funciona literalmente como o <em>System Prompt</em> da ferramenta!
+        </p>
+      </div>
+
+      <h3>3. `llm.bind_tools([tool1, tool2])`</h3>
+      <p>
+        Informa ao modelo: <em>"Aqui estão as funções que você tem autorização para solicitar quando precisar de dados externos."</em> O modelo passa a gerar respostas com o campo <code>tool_calls</code> preenchido quando achar necessário.
+      </p>
+
+      <h3>4. O Quarteto de Mensagens (`langchain_core.messages`)</h3>
+      <ul>
+        <li><code>SystemMessage</code>: A bússola moral e técnica do agente (regras e persona).</li>
+        <li><code>HumanMessage</code>: A pergunta que você faz ao agente.</li>
+        <li><code>AIMessage</code>: O que o modelo devolve (pode ser o texto final ou um pedido de tool).</li>
+        <li><code>ToolMessage</code>: O resultado produzido pela sua máquina, indexado pelo <code>tool_call_id</code>.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>4. Verificação de Aprendizado (Active Retrieval)</h2>
+      <p>Responda para validar sua compreensão antes de escrevermos as ferramentas:</p>
+
+      <div class="quiz-box">
+        <div class="quiz-question">
+          Qual é o papel exato do modelo de linguagem (LLM) durante o processo de Tool Calling?
+        </div>
+        <div class="quiz-options">
+          <button class="quiz-btn" onclick="checkAnswer(this, false)">
+            O modelo executa nativamente as funções em Python no servidor local.
+          </button>
+          <button class="quiz-btn" onclick="checkAnswer(this, true)">
+            O modelo apenas solicita a execução gerando parâmetros em formato JSON.
+          </button>
+          <button class="quiz-btn" onclick="checkAnswer(this, false)">
+            O modelo compila diretamente o código Python para instruções de máquina.
+          </button>
+          <button class="quiz-btn" onclick="checkAnswer(this, false)">
+            O modelo armazena diretamente os registros na memória do banco relacional.
+          </button>
+        </div>
+        <div id="quiz-feedback" class="quiz-feedback"></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>5. Material Recomendado de Leitura (Primary Source)</h2>
+      <p>
+        Guia conceitual da documentação oficial do LangChain sobre chamada de ferramentas:
+      </p>
+      <p>
+        📖 <strong>LangChain Conceptual Guides: Tool Calling</strong><br>
+        <a href="https://python.langchain.com/docs/concepts/tool_calling/" target="_blank" rel="noopener">Acessar documentação oficial de Tool Calling no LangChain</a>
+      </p>
+    </section>
+
+    <footer>
+      <div class="footer-nav">
+        <a href="0001-anatomia-do-agente-text-to-sql-e-guardrails.html">← Lição 0001</a>
+        <a href="../reference/02-langchain-tool-calling-reference.html">Guia de Referência #02 →</a>
+      </div>
+      <div class="teacher-reminder">
+        💡 <strong>Tudo claro sobre como o LangChain conversa com seu código?</strong> Se tiver qualquer dúvida sobre o ciclo de mensagens ou o decorador <code>@tool</code>, pergunte aqui no chat! Na sequência, vamos criar as duas ferramentas do agente no seu notebook.
+      </div>
+    </footer>
+  </div>
+
+  <script>
+    function checkAnswer(button, isCorrect) {
+      const feedback = document.getElementById('quiz-feedback');
+      const buttons = button.parentElement.querySelectorAll('.quiz-btn');
+      buttons.forEach(btn => btn.style.pointerEvents = 'none');
+
+      if (isCorrect) {
+        button.style.backgroundColor = 'var(--success-bg)';
+        button.style.borderColor = 'var(--success-border)';
+        feedback.className = 'quiz-feedback correct';
+        feedback.innerHTML = '<strong>Exato!</strong> O modelo é puramente preditivo e jamais executa código na sua máquina. Ele apenas gera uma mensagem estruturada pedindo para o seu ambiente local executar a ferramenta com os parâmetros fornecidos.';
+      } else {
+        button.style.backgroundColor = 'var(--danger-bg)';
+        button.style.borderColor = 'var(--danger-border)';
+        feedback.className = 'quiz-feedback incorrect';
+        feedback.innerHTML = '<strong>Incorreto.</strong> Lembre-se: o modelo de linguagem nunca toca no hardware nem compila código. Ele apenas prevê texto e argumentos estruturados (JSON), delegando a execução física para o seu orquestrador Python.';
+      }
+    }
+  </script>
+</body>
+</html>

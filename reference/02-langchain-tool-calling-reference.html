@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Referência Rápida: LangChain Core & Tool Calling</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="lesson-meta">
+        <span>Guia de Referência #02</span>
+        <span class="badge">LangChain Core</span>
+      </div>
+      <h1>LangChain: Protocolo de Mensagens & Tool Calling</h1>
+      <p class="subtitle">Guia sintático dos blocos fundamentais para orquestração de agentes</p>
+    </header>
+
+    <section>
+      <h2>1. As 4 Mensagens Fundamentais (`langchain_core.messages`)</h2>
+      <p>Todo agente conversacional no LangChain troca uma lista ordenada de mensagens:</p>
+      
+      <ul>
+        <li><code>SystemMessage</code>: Define a persona, regras, schema linking e restrições éticas/técnicas. É o "cérebro" das instruções.</li>
+        <li><code>HumanMessage</code>: O input enviado pelo usuário final (ex.: <em>"Quais os filmes de ficção científica mais lucrativos?"</em>).</li>
+        <li><code>AIMessage</code>: A resposta gerada pelo modelo. Pode conter texto final em <code>content</code> ou intenções de chamada em <code>tool_calls</code>.</li>
+        <li><code>ToolMessage</code>: O resultado produzido pela sua função Python real, devolvido ao modelo com o <code>tool_call_id</code> correspondente.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>2. O Decorador `@tool` de `langchain_core.tools`</h2>
+      <p>Transforma qualquer função Python em uma ferramenta estruturada legível pelo modelo:</p>
+      <pre><code>from langchain_core.tools import tool
+
+@tool
+def get_movie_rating(title: str) -> str:
+    """Retorna a nota IMDb e TMDB de um filme a partir do título exato.
+    
+    Args:
+        title: O nome do filme a ser pesquisado.
+    """
+    # Código Python executado localmente na sua máquina
+    return f"Nota IMDb de {title}: 8.5"</code></pre>
+      
+      <div class="callout info">
+        <div class="callout-title">Regra de Ouro da Docstring</div>
+        <p>A LLM <strong>não lê o código interno</strong> da função; ela lê <strong>apenas o nome, os tipos dos argumentos e a docstring</strong>. Se a docstring for vaga, o agente não saberá quando ou como chamar sua tool.</p>
+      </div>
+    </section>
+
+    <section>
+      <h2>3. O Loop de Execução de Tool Calling (Sem Mágica)</h2>
+      <pre><code># 1. Vincular ferramentas ao modelo
+llm_with_tools = llm.bind_tools([get_movie_rating, execute_safe_sql])
+
+# 2. Primeira invocação
+messages = [
+    SystemMessage(content="Você é um assistente analítico."),
+    HumanMessage(content="Qual a nota de Inception?")
+]
+ai_msg = llm_with_tools.invoke(messages)
+messages.append(ai_msg)
+
+# 3. Execução das ferramentas solicitadas
+if ai_msg.tool_calls:
+    for call in ai_msg.tool_calls:
+        # call tem: {'name': '...', 'args': {...}, 'id': '...'}
+        tool_to_run = tools_by_name[call["name"]]
+        output = tool_to_run.invoke(call["args"])
+        
+        # 4. Empacota a resposta como ToolMessage
+        messages.append(ToolMessage(content=str(output), tool_call_id=call["id"]))
+
+# 5. Invocação final com os dados reais
+final_response = llm_with_tools.invoke(messages)
+print(final_response.content)</code></pre>
+    </section>
+
+    <footer>
+      <div class="footer-nav">
+        <a href="01-text-to-sql-guardrails-cheatsheet.html">← Guia de Referência #01</a>
+        <a href="../lessons/0002-desmistificando-o-langchain-e-tool-calling.html">Ir para Lição 0002 →</a>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>

@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lição 0001: Anatomia de um Agente Text-to-SQL e a Tríade de Guardrails</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="lesson-meta">
+        <span>Lição 0001 · Text-to-SQL Masterclass</span>
+        <span class="badge">Conceito & Segurança</span>
+      </div>
+      <h1>A Anatomia de um Agente Text-to-SQL e a Tríade de Guardrails</h1>
+      <p class="subtitle">Como transformar perguntas humanas em consultas SQL sem explodir seu banco de dados ou comprometer a segurança</p>
+    </header>
+
+    <section>
+      <h2>1. O Problema da Abordagem Ingênua ("Vibe-Prompting")</h2>
+      <p>
+        Quando alguém começa a construir um sistema Text-to-SQL, o impulso comum é: <em>"Vou pegar todo o esquema do banco de dados, colocar no System Prompt e pedir para a LLM gerar uma consulta SQL."</em>
+      </p>
+      <p>
+        Em bases reais como o <strong>CineData</strong> (que possui 10 tabelas, mais de 700 mil registros e relacionamentos complexos com tabelas bridge), essa abordagem falha violentamente por 4 razões fundamentais:
+      </p>
+
+      <ul>
+        <li>
+          <strong>Efeito "Lost in the Middle" & Sobrecarga de Contexto:</strong> Despejar dezenas de colunas confunde o mecanismo de atenção do modelo. Ele alucina nomes de colunas que não existem ou erra as chaves de junção (<code>JOIN</code>).
+        </li>
+        <li>
+          <strong>Desconexão com Valores Reais (Categorias):</strong> A LLM sabe o nome da coluna <code>status_filme</code>, mas não adivinha se o valor gravado é <code>'Released'</code>, <code>'Lancado'</code> ou <code>'Em exibição'</code>.
+        </li>
+        <li>
+          <strong>Vulnerabilidade Crítica de Segurança (OWASP LLM07):</strong> Se o usuário perguntar <em>"Apague os filmes com nota baixa"</em> ou fizer um jailbreak malicioso, um agente sem guardrails executará um <code>DROP</code> ou <code>DELETE</code> destrutivo.
+        </li>
+        <li>
+          <strong>Exaustão de Recursos (DoS de Memória):</strong> Uma consulta sem cláusula <code>LIMIT</code> em uma base de 700 mil linhas pode derrubar a aplicação por esgotamento de RAM.
+        </li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>2. A Arquitetura em 4 Estágios (Inspirada no CHESS)</h2>
+      <p>
+        Para resolver isso com rigor de engenharia, adotamos o fluxo validado pelo estado da arte acadêmico (notadamente o paper <strong>CHESS</strong>):
+      </p>
+
+      <div class="diagram-box">
+        <pre><code>[1. Pergunta em Linguagem Natural]
+                │
+                ▼
+[2. Schema Linking Sob Demanda] ───► Agente inspeciona apenas as tabelas necessárias
+                │
+                ▼
+[3. Geração de Consulta SQL]     ───► Modelo monta o SELECT com base em regras e exemplos
+                │
+                ▼
+[4. Tríade de Guardrails]        ───► Validação sintática, bloqueio DDL/DML e injeção de LIMIT
+                │
+                ▼
+[5. Execução Safe no SQLite]     ───► Conexão em modo estritamente read-only
+                │
+                ├── (Se houver erro de sintaxe) ──► Loop de Auto-correção
+                ▼
+[6. Síntese Analítica]           ───► LLM explica os números de forma executiva</code></pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>3. A Tríade de Guardrails: Defesa em Profundidade</h2>
+      <p>
+        Nunca confie em prompts em linguagem natural (como <em>"Atenção: gere apenas SELECT"</em>) para garantir segurança. Prompts são maleáveis; guardrails de código são determinísticos e matemáticos.
+      </p>
+
+      <div class="callout danger">
+        <div class="callout-title">Guardrail 1: Validação Estrutural (AST & Tokens)</div>
+        <p>
+          Antes de tocar no banco, a query passa por um validador em Python. Usando regex rigoroso ou análise de AST (Árvore Sintática Abstrata), qualquer comando que não comece com <code>SELECT</code> ou <code>WITH</code> é sumariamente rejeitado, incluindo comandos encadeados por ponto e vírgula (<code>;</code>).
+        </p>
+      </div>
+
+      <div class="callout warning">
+        <div class="callout-title">Guardrail 2: Sanitização Operacional (LIMIT Obrigatório)</div>
+        <p>
+          O sistema inspeciona se a consulta possui uma cláusula de limite. Se o modelo tentar um <code>SELECT * FROM fact_movies_performance</code>, o guardrail intercepta a query e injeta automaticamente um teto de segurança (ex.: <code>LIMIT 100</code>).
+        </p>
+      </div>
+
+      <div class="callout success">
+        <div class="callout-title">Guardrail 3: Trava no Driver do Banco (PRAGMA query_only)</div>
+        <p>
+          A última linha de defesa reside no próprio SQLite. Conectamos com a URI <code>file:cinerocket.db?mode=ro</code> e executamos <code>PRAGMA query_only = ON</code>. Mesmo na improvável hipótese de um comando destrutivo escapar das camadas 1 e 2, o motor em C do SQLite gera uma exceção de leitura imediata.
+        </p>
+      </div>
+    </section>
+
+    <section>
+      <h2>4. Verificação Rápida de Fixação (Active Retrieval)</h2>
+      <p>Teste sua retenção conceitual antes de irmos para a implementação prática:</p>
+
+      <div class="quiz-box">
+        <div class="quiz-question">
+          Por que a instrução de sistema "gere somente consultas do tipo SELECT" não é suficiente em produção?
+        </div>
+        <div class="quiz-options">
+          <button class="quiz-btn" onclick="checkAnswer(this, false)">
+            Porque modelos avançados de IA nunca obedecem instruções textuais complexas.
+          </button>
+          <button class="quiz-btn" onclick="checkAnswer(this, true)">
+            Porque ataques de injeção e jailbreaks contornam promessas puramente textuais.
+          </button>
+          <button class="quiz-btn" onclick="checkAnswer(this, false)">
+            Porque bancos relacionais modernos rejeitam instruções enviadas em português.
+          </button>
+          <button class="quiz-btn" onclick="checkAnswer(this, false)">
+            Porque o protocolo SQL exige tokens binários em vez de declarações escritas.
+          </button>
+        </div>
+        <div id="quiz-feedback" class="quiz-feedback"></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>5. Material Recomendado de Leitura (Primary Source)</h2>
+      <p>
+        Para entender como os melhores sistemas do mundo resolvem esse desafio, leia a seção 1 e 2 do paper:
+      </p>
+      <p>
+        📖 <strong>CHESS: Contextual Harnessing for Efficient SQL Synthesis</strong> (Talaei et al., 2024)<br>
+        <a href="https://arxiv.org/abs/2405.16755" target="_blank" rel="noopener">Acessar o artigo no arXiv (https://arxiv.org/abs/2405.16755)</a>
+      </p>
+    </section>
+
+    <footer>
+      <div class="footer-nav">
+        <span>← Início do Curso</span>
+        <a href="../reference/01-text-to-sql-guardrails-cheatsheet.html">Abrir Guia de Referência #01 →</a>
+      </div>
+      <div class="teacher-reminder">
+        💡 <strong>Dúvidas ou reflexões?</strong> Faça suas perguntas diretamente no chat do terminal! Como seu professor, analisarei cada detalhe para garantir que você domine a arquitetura antes de programarmos a próxima etapa.
+      </div>
+    </footer>
+  </div>
+
+  <script>
+    function checkAnswer(button, isCorrect) {
+      const feedback = document.getElementById('quiz-feedback');
+      const buttons = button.parentElement.querySelectorAll('.quiz-btn');
+      buttons.forEach(btn => btn.style.pointerEvents = 'none');
+
+      if (isCorrect) {
+        button.style.backgroundColor = 'var(--success-bg)';
+        button.style.borderColor = 'var(--success-border)';
+        feedback.className = 'quiz-feedback correct';
+        feedback.innerHTML = '<strong>Correto!</strong> LLMs são sistemas probabilísticos e vulneráveis a Prompt Injection e Jailbreak. Apenas guardrails determinísticos no código e no driver garantem segurança real.';
+      } else {
+        button.style.backgroundColor = 'var(--danger-bg)';
+        button.style.borderColor = 'var(--danger-border)';
+        feedback.className = 'quiz-feedback incorrect';
+        feedback.innerHTML = '<strong>Não exatamente.</strong> A razão principal é que instruções textuais em System Prompts são suscetíveis a injeções de prompt e desvios probabilísticos, exigindo barreiras de código intransponíveis.';
+      }
+    }
+  </script>
+</body>
+</html>
