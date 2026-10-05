@@ -20,7 +20,6 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langchain_core.tools import tool
 from langchain_groq import ChatGroq
 
-# Caminho absoluto: funciona tanto rodando o notebook quanto `streamlit run app.py`.
 DB_PATH = str(Path(__file__).resolve().parent / "data" / "cinerocket.db")
 
 
@@ -93,6 +92,12 @@ def execute_safe_query(db_path: str, query: str) -> Dict[str, Any]:
     safe_query = enforce_query_limits(query)
 
     abs_path = os.path.abspath(db_path)
+    if not os.path.exists(abs_path):
+        return {
+            "success": False,
+            "error": f"Arquivo de banco de dados não encontrado em '{abs_path}'. Execute 'python download_db.py' para baixá-lo.",
+            "data": [],
+        }
 
     uri_path = f"file:{abs_path}?mode=ro"
 
@@ -133,6 +138,9 @@ def describe_tables(table_names: str) -> str:
     Ou passe nomes de tabelas separados por vírgula (ex: 'dim_movies, fact_movies_performance')
     para ver suas colunas e tipos de dados.
     """
+    if not os.path.exists(DB_PATH):
+        return f"Arquivo de banco de dados não encontrado em '{DB_PATH}'. Execute 'python download_db.py' para baixá-lo."
+
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
@@ -165,10 +173,6 @@ def execute_sql_query(query: str) -> Tuple[str, Dict[str, Any]]:
     A query deve ser estritamente de leitura (SELECT ou WITH) e é protegida por guardrails.
     Retorna os dados em formato JSON ou a mensagem de erro detalhada para correção.
     """
-    # A docstring acima é o que o modelo lê. O retorno é um par:
-    # - content: texto curto (máx. 15 linhas) que vai para o modelo no ToolMessage;
-    # - artifact: resultado completo (SQL executado + linhas) que fica em
-    #   ToolMessage.artifact, visível só para o código (a interface), nunca para o modelo.
     result = execute_safe_query(DB_PATH, query)
 
     if not result["success"]:
@@ -309,7 +313,6 @@ def run_cinedata_agente(question: str, max_steps: int = 5, verbose: bool = True)
 # =============================================================================
 
 MODEL_NAME = "openai/gpt-oss-120b"
-
 
 def has_api_key() -> bool:
     """True se a GROQ_API_KEY estiver disponível (no ambiente ou no .env)."""

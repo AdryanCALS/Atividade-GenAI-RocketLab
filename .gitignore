@@ -14,6 +14,8 @@ venv/
 *.db-wal
 *.sqlite
 *.sqlite3
+*.zip
+*.tar.gz
 data/
 
 # --- Python ---
@@ -29,6 +31,20 @@ __pycache__/
 .aider-desk/
 .vscode/
 .idea/
+
+# --- Artefatos auxiliares e ferramentas de aprendizado ---
+.agents/
+skills-lock.json
+lessons/
+learning-records/
+reference/
+description/
+assets/
+docs/
+RESOURCES.md
+MISSION.md
+NOTES.md
+GLOSSARY.md
 
 # --- Material de referência de terceiros ---
 example_code/

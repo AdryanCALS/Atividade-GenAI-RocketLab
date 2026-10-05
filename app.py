@@ -21,15 +21,16 @@ from cinedata_agent import (
     has_api_key,
     stream_agent,
 )
+from download_db import download_database, is_database_ready
 
 # Uma pergunta de cada categoria da suíte de testes do notebook.
 SUGGESTED_QUESTIONS = [
-    ("💰", "Quais são os 10 filmes com maior receita em reais (receita_brl) no catálogo?"),
-    ("🔥", "Quais são os 5 filmes mais populares do catálogo segundo a métrica de popularidade?"),
-    ("🎬", "Quais são os diretores (tipo_pessoa = 'Diretor') com maior nota média IMDb, "
+    ("", "Quais são os 10 filmes com maior receita em reais (receita_brl) no catálogo?"),
+    ("", "Quais são os 5 filmes mais populares do catálogo segundo a métrica de popularidade?"),
+    ("", "Quais são os diretores (tipo_pessoa = 'Diretor') com maior nota média IMDb, "
            "considerando apenas diretores com no mínimo 5 filmes dirigidos?"),
-    ("🎭", "Qual é a quantidade de filmes cadastrados para cada gênero no catálogo?"),
-    ("⭐", "Quais são os filmes mais avaliados pelos usuários segundo a tabela de reviews?"),
+    ("", "Qual é a quantidade de filmes cadastrados para cada gênero no catálogo?"),
+    ("", "Quais são os filmes mais avaliados pelos usuários segundo a tabela de reviews?"),
 ]
 
 
@@ -121,7 +122,7 @@ if "entries" not in st.session_state:
     st.session_state.entries = []
 
 with st.sidebar:
-    st.header("🎬 CineData Analytics")
+    st.header("CineData Analytics")
     st.write(
         "Pergunte em português sobre filmes, bilheteria, elenco e avaliações. "
         "O agente consulta o banco em modo somente leitura e mostra o SQL que executou."
@@ -139,10 +140,34 @@ if not api_key_ok:
         "projeto (veja `.env.example`) e reinicie o app."
     )
 
+db_ok = is_database_ready()
+if not db_ok:
+    st.warning("**Banco de dados não encontrado localmente (`data/cinerocket.db`).**")
+    st.info(
+        "Como o banco possui ~581 MB, ele fica fora do Git e pode ser baixado automaticamente "
+        "do GitHub Releases pelo botão abaixo ou com o comando `python download_db.py` no terminal."
+    )
+    if st.button("Baixar banco de dados do CineData"):
+        progress_bar = st.progress(0, text="Iniciando download...")
+        status_text = st.empty()
+
+        def update_progress(fraction: float, msg: str):
+            progress_bar.progress(int(fraction * 100))
+            status_text.text(msg)
+
+        try:
+            download_database(progress_callback=update_progress)
+            st.success("Banco de dados pronto com sucesso! Recarregando...")
+            st.rerun()
+        except Exception as err:
+            st.error(f"Erro ao baixar banco de dados: {err}")
+
+app_ready = api_key_ok and db_ok
+
 for entry in st.session_state.entries:
     render_entry(entry)
 
-question = st.chat_input("Faça uma pergunta sobre o catálogo...", disabled=not api_key_ok)
+question = st.chat_input("Faça uma pergunta sobre o catálogo...", disabled=not app_ready)
 question = question or st.session_state.pop("pending_question", None)
 
 if not st.session_state.entries and not question:
@@ -151,7 +176,7 @@ if not st.session_state.entries and not question:
         st.button(
             f"{icon} {suggestion}",
             width="stretch",
-            disabled=not api_key_ok,
+            disabled=not app_ready,
             on_click=st.session_state.__setitem__,
             args=("pending_question", suggestion),
         )
