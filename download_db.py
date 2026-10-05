@@ -16,17 +16,26 @@ import zipfile
 from pathlib import Path
 from typing import Callable, Optional
 
+from dotenv import load_dotenv
+
+# Carrega variáveis do arquivo .env
+load_dotenv()
+
 # Diretórios padrão
 PROJECT_ROOT = Path(__file__).resolve().parent
 DATA_DIR = PROJECT_ROOT / "data"
 DB_PATH = DATA_DIR / "cinerocket.db"
 ZIP_PATH = PROJECT_ROOT / "cinerocket.db.zip"
 
-# URL padrão para download do release no GitHub (pode ser sobrescrita via .env ou CLI)
-DEFAULT_RELEASE_URL = os.getenv(
-    "CINEDATA_DB_URL",
-    "https://github.com/SEU_USUARIO/SEU_REPOSITORIO/releases/download/v1.0.0/cinerocket.db.zip",
-)
+DEFAULT_RELEASE_URL = "https://github.com/AdryanCALS/Atividade-GenAI-RocketLab/releases/download/v1.0.0/cinerocket.db.zip"
+
+
+def get_download_url(custom_url: Optional[str] = None) -> str:
+    """Retorna a URL a ser utilizada para o download (customizada > .env > padrão)."""
+    load_dotenv()
+    if custom_url:
+        return custom_url
+    return os.getenv("CINEDATA_DB_URL") or DEFAULT_RELEASE_URL
 
 
 def is_database_ready(db_path: Optional[Path] = None) -> bool:
@@ -100,7 +109,7 @@ def download_database(
     - Valida integridade do SQLite após o término.
     """
     target_db = dest_db or DB_PATH
-    download_url = url or DEFAULT_RELEASE_URL
+    download_url = get_download_url(url)
 
     if is_database_ready(target_db):
         if progress_callback:
@@ -246,7 +255,7 @@ def main() -> None:
         print(f"O banco de dados já está presente e íntegro: {DB_PATH} ({size_mb:.1f} MB)")
         return
 
-    url = args.url or DEFAULT_RELEASE_URL
+    url = get_download_url(args.url)
     print(f"Iniciando download de {url}...")
     try:
         download_database(url=url, progress_callback=cli_progress)

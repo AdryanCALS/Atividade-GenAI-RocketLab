@@ -34,7 +34,7 @@ Para manter o repositório enxuto e reprodutível, adotou-se a distribuição do
 
 - **Especificar uma URL customizada de download:**
   ```bash
-  python download_db.py --url "https://github.com/SEU_USUARIO/SEU_REPOSITORIO/releases/download/v1.0.0/cinerocket.db.zip"
+  python download_db.py --url "https://github.com/AdryanCALS/Atividade-GenAI-RocketLab/releases/download/v1.0.0/cinerocket.db.zip"
   ```
 
 - **Empacotar a base local para publicação de um novo release (mantenedor):**
@@ -79,7 +79,7 @@ Edite o arquivo `.env`:
 GROQ_API_KEY=gsk_sua_chave_aqui
 
 # Opcional: caso deseje apontar para um release específico
-# CINEDATA_DB_URL=https://github.com/SEU_USUARIO/SEU_REPOSITORIO/releases/download/v1.0.0/cinerocket.db.zip
+# CINEDATA_DB_URL=https://github.com/AdryanCALS/Atividade-GenAI-RocketLab/releases/download/v1.0.0/cinerocket.db.zip
 ```
 
 ---
